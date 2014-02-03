@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8"/>
+	<meta name="description" content="" />
+	
+	<title>WebRTC Sample</title>
+	
+	<!-- Dependency Classes -->
+	<script src="jquery.min.js" type="text/javascript"></script>
+	<script src="adapter.js" type="text/javascript"></script>
+	
+	<!-- Uncomment for the signaling server sample -->
+	<!-- <script src="socket.io.js" type="text/javascript"></script> -->
+	<!-- <script src="signaling.js" type="text/javascript"></script> -->
+	
+</head>
+<body>
+	
+	<style type="text/css">
+		video {
+			background-color: #000000;
+		}
+		
+		#vidHolder {
+			display: inline;
+		}
+		
+		#startBtn {
+			width: 320px;
+		}
+		
+	</style>
+	
+	<script type="text/javascript">
+		
+		var selfView, remoteView, startBtn;
+		var rtcConnection, signaling;
+		
+		$(document).ready( function(){
+			
+			//Get elements from DOM
+			selfView = document.getElementById("selfView");
+			remoteView = document.getElementById("remoteView");
+			startBtn = document.getElementById("startBtn");
+			
+			//Make sure start button listens to click event
+			$(startBtn).click(startCall);
+			
+			//setup connection
+			setupConnection();
+		});
+		
+		function setupConnection() {
+			
+			//Uncomment to use NodeJS sample
+			//signaling = new Signaling("HTTP path to Node server");
+			
+			//For own implementation use same API or comment out signaling methods and implement own API
+			signaling.onMessage( onSignalingEvent );
+			
+			var rtcInfo = createIceServer("HTTP Path to STUN/TURN Server locations", "Your server assigned username", "Your server assigned password");
+			
+			//Create new rtc connection
+			rtcConnection = new RTCPeerConnection(rtcInfo);
+			
+			//Listen to rtc events
+			rtcConnection.onicecandidate = function( evt ) {
+				if( evt.candidate != undefined ) signaling.send( JSON.stringify({"type":"candidate","candidate":evt.candidate }));
+			}
+			
+			rtcConnection.onaddstream = function( evt ) {
+				
+				//Attach incoming stream to remote view
+				attachMediaStream(remoteView, evt.stream);
+			}
+			
+			getUserMedia({"video":true, "audio":true}, 
+						 function( stream ) {
+							//Attach local media stream to video element
+							attachMediaStream(selfView, stream);
+							
+							//Attach stream to the RTC connection
+							rtcConnection.addStream(stream);
+						 },
+						 //Handles error calls
+						 function(e) {
+							console.log("##ERROR:There was an error getting the requested media#");
+						 });
+		}
+		
+		function startCall() {
+			rtcConnection.createOffer( function( desc ) {
+				
+				//Fires when the offer creates the description
+				rtcConnection.setLocalDescription(desc);
+				signaling.send( JSON.stringify({"type":"sdp","sdp":desc }));
+			} 
+			//Handle any error calls
+			, function() {
+				console.log("##ERROR:There was an error with the description#");
+			});
+		}
+		
+		function onSignalingEvent( event ) {
+		
+			//parse data
+			event = JSON.parse(event);
+			
+			switch( event.type )
+			{
+				case "candidate" : 
+					rtcConnection.addIceCandidate(new RTCIceCandidate(event.candidate));
+					break;
+				case "sdp" :  
+					//Gets description from caller and set it to RTC connection
+					rtcConnection.setRemoteDescription(new RTCSessionDescription(event.sdp));
+					
+					//Create a description to send back to the caller
+					rtcConnection.createAnswer( function(desc) {
+						rtcConnection.setLocalDescription(desc);
+						signaling.send( JSON.stringify({"type":"sdpRemote","sdp":desc }));
+					},
+					//Handles Error
+					function() {
+						console.log("##ERROR:There was an error with the description#");
+					});
+					break;
+				case "sdpRemote" : 
+					//Get the description from the callee and set it to the RTC connection
+					rtcConnection.setRemoteDescription(new RTCSessionDescription(event.sdp));
+					break;
+			}
+		}
+		
+	</script>
+	
+	<div id="vidHolder">
+		<video id="selfView" autoPlay="true" width="320" height="240"></video>
+		<video id="remoteView" autoPlay="true" width="320" height="240"></video>
+	</div>
+	<button id="startBtn">Start</button>
+</body>
+</html>
